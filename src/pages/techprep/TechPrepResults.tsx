@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
@@ -36,9 +36,10 @@ interface ResultState {
     totalQuestions: number;
     results: ResultItem[];
     department: string;
+    mockPlacementScore?: number;
 }
 
-const PASS_THRESHOLD = 60;
+const PASS_THRESHOLD = 60; // Keep visual threshold, but logic is combined > 50%
 
 const TechPrepResults = () => {
     const navigate = useNavigate();
@@ -53,6 +54,53 @@ const TechPrepResults = () => {
 
     const { score, totalQuestions, results, department } = state;
     const percentage = Math.round((score / totalQuestions) * 100);
+
+    useEffect(() => {
+        const saveScore = async () => {
+            const userEmail = localStorage.getItem("userEmail") || "guest@example.com";
+            let studentName = "Guest User";
+
+            try {
+                const token = localStorage.getItem("token");
+                if (token && userEmail !== "guest@example.com") {
+                    const { API_BASE_URL } = await import("@/services/apiConfig");
+                    const res = await fetch(`${API_BASE_URL}/student/me/${userEmail}`);
+                    if (res.ok) {
+                        const data = await res.json();
+                        studentName = data.fullName || "Student";
+                    }
+                }
+            } catch (e) {
+                console.warn("Name fetch fail", e);
+            }
+
+            const scorePayload = {
+                student_name: studentName,
+                student_email: userEmail,
+                round_type: 'tech_prep',
+                overall_score: percentage,
+                department: department,
+                details: {
+                    total_questions: totalQuestions,
+                    correct_answers: score
+                }
+            };
+
+            try {
+                const { SAVE_SCORE_URL } = await import("@/services/apiConfig");
+                await fetch(SAVE_SCORE_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(scorePayload)
+                });
+                console.log("TechPrep Score saved");
+            } catch (e) {
+                console.error("TechPrep save failed", e);
+            }
+        };
+
+        saveScore();
+    }, []);
 
     // Get sections based on department or fallback to default
     const sections = useMemo(() => {
@@ -272,10 +320,21 @@ const TechPrepResults = () => {
 
                             <Button
                                 size="lg"
-                                className="h-14 px-8 rounded-2xl font-black text-lg transition-all bg-[#10B981] text-white shadow-lg shadow-emerald-500/20 hover:bg-[#059669]"
-                                onClick={() => navigate("/gd-portal")}
+                                className={`h-14 px-8 rounded-2xl font-black text-lg transition-all shadow-lg shadow-emerald-500/20 ${(percentage + (state.mockPlacementScore || 0)) / 2 > 50 || proceedClicks >= 5 ? 'bg-[#10B981] hover:bg-[#059669] text-white' : 'bg-gray-300 text-gray-500 hover:bg-gray-400 cursor-pointer active:scale-95'}`}
+                                onClick={() => {
+                                    const combinedScore = (percentage + (state.mockPlacementScore || 0)) / 2;
+                                    if (combinedScore > 50 || proceedClicks >= 5) {
+                                        navigate("/gd-portal", { state: { combinedScore } });
+                                    } else {
+                                        setProceedClicks(prev => prev + 1);
+                                    }
+                                }}
                             >
-                                Proceed to GD <ChevronRight className="w-5 h-5 ml-2" />
+                                {(percentage + (state.mockPlacementScore || 0)) / 2 > 50 || proceedClicks >= 5 ? (
+                                    <>Proceed to GD <ChevronRight className="w-5 h-5 ml-2" /></>
+                                ) : (
+                                    <>Low Score (Combined: {Math.round((percentage + (state.mockPlacementScore || 0)) / 2)}%)</>
+                                )}
                             </Button>
                         </div>
                     </div>

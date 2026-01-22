@@ -1,6 +1,55 @@
-// Detect environment to set appropriate backend URL
+import axios from 'axios';
+
 const isDev = import.meta.env.DEV;
 const localUrl = 'http://127.0.0.1:8000';
-const productionUrl = 'https://mockellobackend.onrender.com';
 
-export const API_BASE_URL = import.meta.env.VITE_API_URL || (isDev ? localUrl : productionUrl);
+// Load-balanced production backends
+const backendUrls = [
+  'https://mockello1234.onrender.com',
+  'https://mockellobackend.onrender.com'
+];
+
+// Select backend URL based on environment
+let productionUrl = backendUrls[0];
+if (import.meta.env.VITE_API_URL) {
+  productionUrl = import.meta.env.VITE_API_URL;
+} else if (typeof window !== 'undefined' && window.localStorage) {
+  // Simple round-robin: alternate between backends on refresh
+  const lastUsedIndex = parseInt(window.localStorage.getItem('lastBackendIndex') || '0');
+  const nextIndex = (lastUsedIndex + 1) % backendUrls.length;
+  productionUrl = backendUrls[nextIndex];
+  window.localStorage.setItem('lastBackendIndex', nextIndex.toString());
+}
+
+export const API_BASE_URL = isDev ? localUrl : productionUrl;
+console.log(`[API] Connected to backend: ${API_BASE_URL}`);
+
+
+export const SAVE_SCORE_URL = `${API_BASE_URL}/scores/save`;
+export const TECHNICAL_QUESTIONS_URL = `${API_BASE_URL}/technical-interview/questions`;
+export const TECHNICAL_EVALUATE_URL = `${API_BASE_URL}/technical-interview/evaluate`;
+export const GET_STUDENT_PROFILE_URL = (email: string) => `${API_BASE_URL}/student/me/${email}`;
+
+// Axios Instance for GD Module
+const api = axios.create({
+    baseURL: API_BASE_URL
+});
+
+export const apiService = {
+    createSession: (topic: string) => api.post('/gd-session/join-lobby', { topic }), // Modified to point to lobby or similar
+    joinLobby: (participantId: string, peerId: string, name: string) =>
+        api.post('/gd-session/join-lobby', { participantId, peerId, name }),
+    getSessionStatus: (sessionId: string) => api.get(`/gd-session/status?sessionId=${sessionId}`),
+    getMyRoom: (sessionId: string, participantId: string) =>
+        api.get(`/gd-session/my-room?sessionId=${sessionId}&participantId=${participantId}`),
+    sendTranscript: (sessionId: string, roomId: string | undefined, speakerId: string, text: string) =>
+        api.post('/gd-transcript/add', { sessionId, roomId, speakerId, text }),
+    getTranscripts: (sessionId: string, roomId?: string) =>
+        api.get(`/gd-transcript/${sessionId}${roomId ? `?roomId=${roomId}` : ''}`),
+    api: api, // Expose instance
+    async evaluateParticipant(sessionId: string, roomId: string, peerId: string) {
+        return axios.post(`${API_BASE_URL}/gd-evaluation/evaluate`, { sessionId, roomId, peerId });
+    },
+    toggleUserTalking: (roomId: string, isTalking: boolean) =>
+        api.post('/gd-session/toggle-user-talking', { roomId, isTalking }),
+};
